@@ -11,12 +11,13 @@ public class CarController : MonoBehaviour
     [Header("Car Settings")]
     public float motorForce = 1800f;
     public float brakeForce = 3500f;
-    public float maxSteerAngle = 30f;
+    public float maxSteerAngle = 28f;
     public float maxSpeed = 180f;
 
     [Header("Driving Feel")]
     public float accelerationSmoothness = 3f;
     public float brakeSmoothness = 5f;
+    public float steeringSmoothness = 5f;
 
     [Header("Grip System")]
     public float tireTemperature = 20f;
@@ -27,6 +28,13 @@ public class CarController : MonoBehaviour
     public float tireHeatingSpeed = 8f;
     public float tireCoolingSpeed = 3f;
 
+    [Header("Aerodynamics")]
+    public float downforce = 50f;
+
+    [Header("Anti Roll Bars")]
+    public float antiRollForceFront = 6000f;
+    public float antiRollForceRear = 5000f;
+
     private Rigidbody rb;
 
     private float verticalInput;
@@ -34,6 +42,7 @@ public class CarController : MonoBehaviour
 
     private float currentMotorForce;
     private float currentBrakeForce;
+    private float currentSteerAngle;
 
     private float speed;
 
@@ -45,7 +54,8 @@ public class CarController : MonoBehaviour
         rb.drag = 0.05f;
         rb.angularDrag = 2f;
 
-        rb.centerOfMass = new Vector3(0f, -0.5f, 0f);
+        // Centro de masa bajo para que no se sienta como caja
+        rb.centerOfMass = new Vector3(0f, -0.9f, 0.2f);
     }
 
     void Update()
@@ -56,9 +66,16 @@ public class CarController : MonoBehaviour
     void FixedUpdate()
     {
         CalculateSpeed();
+
         UpdateGripSystem();
+
         HandleMotor();
         HandleSteering();
+
+        ApplyDownforce();
+
+        ApplyAntiRollBar(frontLeftWheel, frontRightWheel, antiRollForceFront);
+        ApplyAntiRollBar(rearLeftWheel, rearRightWheel, antiRollForceRear);
     }
 
     void GetInput()
@@ -119,7 +136,7 @@ public class CarController : MonoBehaviour
         rearLeftWheel.motorTorque = currentMotorForce;
         rearRightWheel.motorTorque = currentMotorForce;
 
-        // Frenos en las 4 ruedas
+        // Freno en las 4 ruedas
         frontLeftWheel.brakeTorque = currentBrakeForce;
         frontRightWheel.brakeTorque = currentBrakeForce;
         rearLeftWheel.brakeTorque = currentBrakeForce;
@@ -128,16 +145,25 @@ public class CarController : MonoBehaviour
 
     void HandleSteering()
     {
+        // A más velocidad, menos ángulo de giro
         float speedFactor = Mathf.Clamp01(speed / 120f);
 
-        float gripSteerBonus = Mathf.Clamp(finalGrip, 0.2f, 1.3f);
+        float steerLimit = Mathf.Lerp(maxSteerAngle, 8f, speedFactor);
 
-        float steerLimit = Mathf.Lerp(maxSteerAngle, 10f, speedFactor);
+        // Si hay poco agarre, también gira menos
+        float gripSteerFactor = Mathf.Clamp(finalGrip, 0.25f, 1.2f);
 
-        float steerAngle = horizontalInput * steerLimit * gripSteerBonus;
+        float targetSteerAngle = horizontalInput * steerLimit * gripSteerFactor;
 
-        frontLeftWheel.steerAngle = steerAngle;
-        frontRightWheel.steerAngle = steerAngle;
+        // Suaviza la dirección para que no gire de golpe
+        currentSteerAngle = Mathf.Lerp(
+            currentSteerAngle,
+            targetSteerAngle,
+            steeringSmoothness * Time.fixedDeltaTime
+        );
+
+        frontLeftWheel.steerAngle = currentSteerAngle;
+        frontRightWheel.steerAngle = currentSteerAngle;
     }
 
     void UpdateGripSystem()
@@ -151,9 +177,9 @@ public class CarController : MonoBehaviour
     {
         bool isMovingFast = speed > 20f;
         bool isTurning = Mathf.Abs(horizontalInput) > 0.2f;
-        bool isAccelerating = Mathf.Abs(verticalInput) > 0.2f;
+        bool isAcceleratingOrBraking = Mathf.Abs(verticalInput) > 0.2f;
 
-        if (isMovingFast && (isTurning || isAccelerating))
+        if (isMovingFast && (isTurning || isAcceleratingOrBraking))
         {
             tireTemperature += tireHeatingSpeed * Time.fixedDeltaTime;
         }
@@ -243,11 +269,62 @@ public class CarController : MonoBehaviour
     void ApplyGripToWheel(WheelCollider wheel, float grip)
     {
         WheelFrictionCurve sidewaysFriction = wheel.sidewaysFriction;
+
+        sidewaysFriction.extremumSlip = 0.25f;
+        sidewaysFriction.extremumValue = 1.0f;
+        sidewaysFriction.asymptoteSlip = 0.6f;
+        sidewaysFriction.asymptoteValue = 0.75f;
         sidewaysFriction.stiffness = grip;
+
         wheel.sidewaysFriction = sidewaysFriction;
 
         WheelFrictionCurve forwardFriction = wheel.forwardFriction;
+
+        forwardFriction.extremumSlip = 0.35f;
+        forwardFriction.extremumValue = 1.0f;
+        forwardFriction.asymptoteSlip = 0.8f;
+        forwardFriction.asymptoteValue = 0.7f;
         forwardFriction.stiffness = grip;
+
         wheel.forwardFriction = forwardFriction;
+    }
+
+    void ApplyDownforce()
+    {
+        rb.AddForce(-transform.up * downforce * rb.velocity.magnitude);
+    }
+
+    void ApplyAntiRollBar(WheelCollider leftWheel, WheelCollider rightWheel, float antiRollForce)
+    {
+        WheelHit hit;
+
+        float travelLeft = 1.0f;
+        float travelRight = 1.0f;
+
+        bool groundedLeft = leftWheel.GetGroundHit(out hit);
+
+        if (groundedLeft)
+        {
+            travelLeft = (-leftWheel.transform.InverseTransformPoint(hit.point).y - leftWheel.radius) / leftWheel.suspensionDistance;
+        }
+
+        bool groundedRight = rightWheel.GetGroundHit(out hit);
+
+        if (groundedRight)
+        {
+            travelRight = (-rightWheel.transform.InverseTransformPoint(hit.point).y - rightWheel.radius) / rightWheel.suspensionDistance;
+        }
+
+        float antiRoll = (travelLeft - travelRight) * antiRollForce;
+
+        if (groundedLeft)
+        {
+            rb.AddForceAtPosition(leftWheel.transform.up * -antiRoll, leftWheel.transform.position);
+        }
+
+        if (groundedRight)
+        {
+            rb.AddForceAtPosition(rightWheel.transform.up * antiRoll, rightWheel.transform.position);
+        }
     }
 }

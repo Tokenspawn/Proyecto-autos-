@@ -943,7 +943,7 @@ GameObject:
   - component: {fileID: 735783574}
   m_Layer: 0
   m_Name: Piso
-  m_TagString: Untagged
+  m_TagString: AsfaltoSuave
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2271,12 +2271,16 @@ MonoBehaviour:
   maxSpeed: 180
   accelerationSmoothness: 3
   brakeSmoothness: 5
+  steeringSmoothness: 5
   tireTemperature: 20
   optimalTemperature: 90
   currentSurfaceGrip: 1
   finalGrip: 1
   tireHeatingSpeed: 8
   tireCoolingSpeed: 3
+  downforce: 50
+  antiRollForceFront: 6000
+  antiRollForceRear: 5000
 --- !u!1 &2066769781
 GameObject:
   m_ObjectHideFlags: 0
